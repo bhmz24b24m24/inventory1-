@@ -1,0 +1,2235 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>لوحة إدارة المخزون</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+<style>body{font-family:'Cairo',Arial,sans-serif}</style>
+<script>
+// ══ مكتبة رسم الرسوم البيانية المدمجة (بديل Chart.js) ══
+const MiniChart = {
+  defaults: { bg:'#111827', textColor:'#94a3b8', gridColor:'rgba(255,255,255,0.05)', fontFamily:'Cairo,Arial,sans-serif' },
+
+  clear(canvas) {
+    const ctx = canvas.getContext('2d');
+    canvas.width = canvas.offsetWidth || 300;
+    canvas.height = canvas.offsetHeight || 200;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    return ctx;
+  },
+
+  doughnut(canvas, labels, data, colors) {
+    const ctx = this.clear(canvas);
+    const cx = canvas.width/2, cy = canvas.height/2;
+    const r = Math.min(cx,cy)*0.78, ri = r*0.55;
+    const total = data.reduce((a,b)=>a+b,0)||1;
+    let angle = -Math.PI/2;
+    data.forEach((v,i) => {
+      const slice = (v/total)*Math.PI*2;
+      ctx.beginPath(); ctx.moveTo(cx,cy);
+      ctx.arc(cx,cy,r,angle,angle+slice);
+      ctx.closePath(); ctx.fillStyle=colors[i]; ctx.fill();
+      angle += slice;
+    });
+    // hole
+    ctx.beginPath(); ctx.arc(cx,cy,ri,0,Math.PI*2);
+    ctx.fillStyle=this.defaults.bg; ctx.fill();
+    // center total
+    ctx.fillStyle='#e2e8f0'; ctx.font=`bold 18px ${this.defaults.fontFamily}`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(total, cx, cy);
+    // legend
+    const lx=8, ly=canvas.height-labels.length*18-4;
+    labels.forEach((l,i)=>{
+      ctx.fillStyle=colors[i]; ctx.fillRect(lx,ly+i*18,10,10);
+      ctx.fillStyle=this.defaults.textColor; ctx.font=`11px ${this.defaults.fontFamily}`;
+      ctx.textAlign='right'; ctx.textBaseline='top';
+      ctx.fillText(`${l} (${data[i]})`, canvas.width-6, ly+i*18);
+    });
+  },
+
+  pie(canvas, labels, data, colors) {
+    const ctx = this.clear(canvas);
+    const cx=canvas.width/2, cy=(canvas.height-40)/2+10;
+    const r=Math.min(cx,cy-10)*0.78;
+    const total=data.reduce((a,b)=>a+b,0)||1;
+    let angle=-Math.PI/2;
+    data.forEach((v,i)=>{
+      const slice=(v/total)*Math.PI*2;
+      ctx.beginPath(); ctx.moveTo(cx,cy);
+      ctx.arc(cx,cy,r,angle,angle+slice);
+      ctx.closePath(); ctx.fillStyle=colors[i]; ctx.fill();
+      ctx.strokeStyle='#111827'; ctx.lineWidth=2; ctx.stroke();
+      angle+=slice;
+    });
+    const lx=6, ly=canvas.height-labels.length*16-2;
+    labels.forEach((l,i)=>{
+      ctx.fillStyle=colors[i]; ctx.fillRect(lx,ly+i*17,10,10);
+      ctx.fillStyle=this.defaults.textColor; ctx.font=`11px ${this.defaults.fontFamily}`;
+      ctx.textAlign='right'; ctx.textBaseline='top';
+      ctx.fillText(`${l} (${data[i]})`, canvas.width-6, ly+i*17);
+    });
+  },
+
+  hbar(canvas, labels, data, colors) {
+    const ctx = this.clear(canvas);
+    const W=canvas.width, H=canvas.height;
+    const pad={top:10,bottom:20,left:10,right:40};
+    const maxV=Math.max(...data,1);
+    const bh=Math.max(12,(H-pad.top-pad.bottom)/labels.length-6);
+    labels.forEach((l,i)=>{
+      const y=pad.top+i*(bh+6);
+      const bw=((data[i]/maxV)*(W-pad.left-pad.right-60));
+      // bar
+      ctx.fillStyle=colors[i]||colors[0];
+      ctx.beginPath();
+      const rr=4;
+      ctx.roundRect(pad.left+60,y,Math.max(bw,4),bh,rr);
+      ctx.fill();
+      // label
+      ctx.fillStyle='#94a3b8'; ctx.font=`11px ${this.defaults.fontFamily}`;
+      ctx.textAlign='right'; ctx.textBaseline='middle';
+      const shortL=l.length>8?l.slice(0,8)+'…':l;
+      ctx.fillText(shortL, pad.left+56, y+bh/2);
+      // value
+      ctx.fillStyle='#e2e8f0'; ctx.textAlign='left';
+      ctx.fillText(data[i]+'%', pad.left+60+Math.max(bw,4)+4, y+bh/2);
+    });
+  },
+
+  groupBar(canvas, labels, datasets) {
+    const ctx = this.clear(canvas);
+    const W=canvas.width, H=canvas.height;
+    const pad={top:30,bottom:50,left:10,right:10};
+    const n=labels.length, m=datasets.length;
+    const allVals=datasets.flatMap(d=>d.data);
+    const maxV=Math.max(...allVals,1);
+    const slotW=(W-pad.left-pad.right)/n;
+    const bw=Math.min(slotW/(m+1), 28);
+
+    // grid lines
+    for(let g=0;g<=4;g++){
+      const y=pad.top+(H-pad.top-pad.bottom)*(1-g/4);
+      ctx.strokeStyle=this.defaults.gridColor; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(pad.left,y); ctx.lineTo(W-pad.right,y); ctx.stroke();
+      ctx.fillStyle='#64748b'; ctx.font=`9px ${this.defaults.fontFamily}`;
+      ctx.textAlign='right'; ctx.fillText(Math.round(maxV*g/4), pad.left+28, y+3);
+    }
+
+    labels.forEach((l,i)=>{
+      const slotX=pad.left+i*slotW;
+      datasets.forEach((ds,j)=>{
+        const bh=((ds.data[i]||0)/maxV)*(H-pad.top-pad.bottom);
+        const x=slotX+(slotW-m*bw)/2+j*bw;
+        const y=H-pad.bottom-bh;
+        ctx.fillStyle=ds.color;
+        ctx.beginPath(); ctx.roundRect(x,y,bw-2,Math.max(bh,2),3); ctx.fill();
+      });
+      // x label
+      ctx.fillStyle='#94a3b8'; ctx.font=`10px ${this.defaults.fontFamily}`;
+      ctx.textAlign='center';
+      const shortL=l.length>6?l.slice(0,6)+'…':l;
+      ctx.fillText(shortL, pad.left+i*slotW+slotW/2, H-pad.bottom+12);
+    });
+
+    // legend
+    datasets.forEach((ds,j)=>{
+      const lx=pad.left+j*(W/m);
+      ctx.fillStyle=ds.color; ctx.fillRect(lx,8,10,10);
+      ctx.fillStyle='#94a3b8'; ctx.font=`10px ${this.defaults.fontFamily}`;
+      ctx.textAlign='left'; ctx.fillText(ds.label, lx+14, 18);
+    });
+  }
+};
+
+// ══ مكتبة تصدير Excel مدمجة (بديل SheetJS) ══
+const MiniXLSX = {
+  // تصدير CSV (يفتح في Excel)
+  toCSV(rows) {
+    return rows.map(r => r.map(c => {
+      const s = String(c??'');
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g,'""')}"` : s;
+    }).join(',')).join('\r\n');
+  },
+  download(rows, filename) {
+    const bom = '\uFEFF'; // UTF-8 BOM for Arabic in Excel
+    const csv = bom + this.toCSV(rows);
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename.replace('.xlsx','.csv');
+    a.click();
+  }
+};
+const XLSX = MiniXLSX; // alias للكود الموجود
+// patch XLSX.utils و XLSX.writeFile
+XLSX.utils = {
+  book_new: () => ({sheets:[]}),
+  aoa_to_sheet: (data) => ({data}),
+  book_append_sheet: (wb, ws, name) => wb.sheets.push({name, ws}),
+};
+XLSX.writeFile = (wb, filename) => {
+  // Export first sheet as CSV
+  if(wb.sheets.length>0) {
+    MiniXLSX.download(wb.sheets[0].ws.data, filename);
+  }
+};
+</script>
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --border: #1e2d45;
+    --accent: #00d4ff;
+    --accent2: #0066ff;
+    --accent3: #7c3aed;
+    --success: #10b981;
+    --danger: #ef4444;
+    --warning: #f59e0b;
+    --text: #e2e8f0;
+    --text-muted: #64748b;
+    --glow: 0 0 20px rgba(0,212,255,0.15);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Cairo', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Lock Screen */
+  #lockScreen {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+  }
+
+  #lockScreen::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  .lock-card {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 48px 40px;
+    width: 360px;
+    text-align: center;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.5), 0 0 60px rgba(0,102,255,0.1);
+    animation: lockIn 0.5s cubic-bezier(0.34,1.56,0.64,1);
+  }
+
+  @keyframes lockIn {
+    from { opacity: 0; transform: scale(0.85) translateY(20px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+
+  .lock-icon-wrap {
+    width: 72px;
+    height: 72px;
+    background: linear-gradient(135deg, var(--accent2), var(--accent));
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    margin: 0 auto 20px;
+    box-shadow: 0 0 40px rgba(0,102,255,0.4);
+  }
+
+  .lock-title {
+    font-size: 20px;
+    font-weight: 900;
+    margin-bottom: 6px;
+  }
+
+  .lock-sub {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 32px;
+  }
+
+  .pin-dots {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+
+  .pin-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    background: transparent;
+    transition: all 0.2s;
+  }
+
+  .pin-dot.filled {
+    background: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 0 10px rgba(0,212,255,0.6);
+  }
+
+  .pin-dot.error {
+    background: var(--danger);
+    border-color: var(--danger);
+    box-shadow: 0 0 10px rgba(239,68,68,0.6);
+    animation: shake 0.4s;
+  }
+
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    20%      { transform: translateX(-6px); }
+    40%      { transform: translateX(6px); }
+    60%      { transform: translateX(-4px); }
+    80%      { transform: translateX(4px); }
+  }
+
+  .pin-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .pin-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+    font-family: 'Cairo', sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.15s;
+    user-select: none;
+  }
+
+  .pin-btn:hover {
+    background: var(--border);
+    border-color: var(--accent);
+    color: var(--accent);
+    transform: scale(1.05);
+  }
+
+  .pin-btn:active {
+    transform: scale(0.95);
+  }
+
+  .pin-btn.zero {
+    grid-column: 2;
+  }
+
+  .pin-btn.del {
+    background: rgba(239,68,68,0.08);
+    border-color: rgba(239,68,68,0.2);
+    color: var(--danger);
+    font-size: 16px;
+  }
+
+  .pin-btn.del:hover {
+    background: rgba(239,68,68,0.15);
+    border-color: var(--danger);
+  }
+
+  .lock-error-msg {
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--danger);
+    font-weight: 600;
+    min-height: 20px;
+    transition: opacity 0.3s;
+  }
+
+  #mainContent { display: none; }
+
+  /* Background grid */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 32px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .logo-icon {
+    width: 52px;
+    height: 52px;
+    background: linear-gradient(135deg, var(--accent2), var(--accent));
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    box-shadow: 0 0 30px rgba(0,102,255,0.4);
+  }
+
+  .header-title h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.5px;
+  }
+
+  .header-title p {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .header-badge {
+    background: rgba(0,212,255,0.1);
+    border: 1px solid rgba(0,212,255,0.2);
+    color: var(--accent);
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  /* Stats Row */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s, border-color 0.2s;
+  }
+
+  .stat-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(0,212,255,0.3);
+  }
+
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; right: 0;
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    opacity: 0.08;
+    transform: translate(20px, -20px);
+  }
+
+  .stat-card:nth-child(1)::before { background: var(--accent); }
+  .stat-card:nth-child(2)::before { background: var(--success); }
+  .stat-card:nth-child(3)::before { background: var(--danger); }
+  .stat-card:nth-child(4)::before { background: var(--warning); }
+
+  .stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .stat-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+  }
+
+  .stat-value {
+    font-size: 28px;
+    font-weight: 900;
+    letter-spacing: -1px;
+  }
+
+  .stat-card:nth-child(1) .stat-value { color: var(--accent); }
+  .stat-card:nth-child(2) .stat-value { color: var(--success); }
+  .stat-card:nth-child(3) .stat-value { color: var(--danger); }
+  .stat-card:nth-child(4) .stat-value { color: var(--warning); }
+
+  /* Main layout */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 420px 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+
+  /* Form Panel */
+  .form-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+    position: sticky;
+    top: 24px;
+  }
+
+  .panel-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface2);
+  }
+
+  .panel-title {
+    font-size: 15px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .panel-title-icon {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, var(--accent2), var(--accent));
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+  }
+
+  .mode-badge {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+
+  .mode-add { background: rgba(16,185,129,0.15); color: var(--success); }
+  .mode-edit { background: rgba(245,158,11,0.15); color: var(--warning); }
+
+  .form-body {
+    padding: 24px;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+
+  .form-group.full { grid-column: 1 / -1; }
+
+  label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  input, select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 11px 14px;
+    color: var(--text);
+    font-family: 'Cairo', sans-serif;
+    font-size: 14px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    width: 100%;
+    direction: rtl;
+  }
+
+  input:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0,212,255,0.1);
+  }
+
+  input::placeholder { color: var(--text-muted); }
+
+  .remaining-display {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 11px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .remaining-value {
+    font-size: 20px;
+    font-weight: 900;
+    color: var(--accent);
+  }
+
+  .remaining-label {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .form-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 20px;
+  }
+
+  .btn {
+    padding: 13px;
+    border-radius: 12px;
+    font-family: 'Cairo', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent2), var(--accent));
+    color: white;
+    box-shadow: 0 4px 20px rgba(0,102,255,0.3);
+    grid-column: 1 / -1;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 25px rgba(0,102,255,0.45);
+  }
+
+  .btn-secondary {
+    background: var(--surface2);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+
+  .btn-secondary:hover {
+    color: var(--text);
+    border-color: var(--border);
+    background: var(--border);
+  }
+
+  /* Table Panel */
+  .table-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+  }
+
+  .table-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface2);
+  }
+
+  .search-box {
+    position: relative;
+    width: 260px;
+  }
+
+  .search-box input {
+    padding-right: 40px;
+    font-size: 13px;
+    background: var(--bg);
+  }
+
+  .search-icon {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    font-size: 14px;
+    pointer-events: none;
+  }
+
+  .table-wrapper {
+    overflow-x: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  thead th {
+    background: rgba(0,212,255,0.05);
+    padding: 12px 16px;
+    text-align: right;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  tbody tr {
+    border-bottom: 1px solid rgba(30,45,69,0.5);
+    transition: background 0.15s;
+    cursor: pointer;
+  }
+
+  tbody tr:hover { background: rgba(0,212,255,0.03); }
+  tbody tr.selected { background: rgba(0,102,255,0.08); }
+
+  tbody td {
+    padding: 13px 16px;
+    white-space: nowrap;
+    color: var(--text);
+  }
+
+  .item-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .item-avatar {
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent2), var(--accent3));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .qty-badge {
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 12px;
+  }
+
+  .qty-available { background: rgba(0,212,255,0.1); color: var(--accent); }
+  .qty-added { background: rgba(16,185,129,0.1); color: var(--success); }
+  .qty-withdrawn { background: rgba(239,68,68,0.1); color: var(--danger); }
+  .qty-remaining-high { background: rgba(16,185,129,0.1); color: var(--success); }
+  .qty-remaining-low { background: rgba(245,158,11,0.1); color: var(--warning); }
+  .qty-remaining-zero { background: rgba(239,68,68,0.1); color: var(--danger); }
+
+  .expiry-badge {
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .expiry-valid { background: rgba(16,185,129,0.1); color: var(--success); }
+  .expiry-soon { background: rgba(245,158,11,0.1); color: var(--warning); }
+  .expiry-expired { background: rgba(239,68,68,0.1); color: var(--danger); }
+  .expiry-none { color: var(--text-muted); }
+
+  .action-btns {
+    display: flex;
+    gap: 6px;
+  }
+
+  .action-btn {
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border: none;
+    font-size: 13px;
+    transition: all 0.15s;
+  }
+
+  .btn-edit {
+    background: rgba(245,158,11,0.1);
+    color: var(--warning);
+  }
+
+  .btn-edit:hover { background: rgba(245,158,11,0.2); }
+
+  .btn-delete {
+    background: rgba(239,68,68,0.1);
+    color: var(--danger);
+  }
+
+  .btn-delete:hover { background: rgba(239,68,68,0.2); }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+  }
+
+  .empty-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+    opacity: 0.3;
+  }
+
+  .table-footer {
+    padding: 14px 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--surface2);
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-80px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 24px;
+    font-size: 14px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    z-index: 1000;
+    transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.success { border-color: var(--success); color: var(--success); }
+  .toast.error { border-color: var(--danger); color: var(--danger); }
+
+  /* Analytics Section */
+  .analytics-section { margin-top: 28px; }
+
+  .section-title {
+    font-size: 16px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+    color: var(--text);
+  }
+
+  .section-title-icon {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, var(--accent3), var(--accent2));
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+  }
+
+  .analytics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 18px;
+    margin-bottom: 18px;
+  }
+
+  .analytics-grid-wide {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 18px;
+  }
+
+  .chart-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 22px;
+    overflow: hidden;
+  }
+
+  .chart-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .chart-card-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .chart-canvas-wrap { position: relative; height: 200px; }
+  .chart-canvas-wrap.tall { height: 250px; }
+
+  .insight-list { display: flex; flex-direction: column; gap: 10px; }
+
+  .insight-item {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: border-color 0.2s;
+  }
+
+  .insight-item:hover { border-color: rgba(0,212,255,0.3); }
+
+  .insight-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .insight-badge {
+    width: 24px; height: 24px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+  }
+
+  .insight-value { font-size: 15px; font-weight: 800; color: var(--accent); }
+
+  /* Export bar */
+  .export-bar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 22px;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 16px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+  }
+
+  .export-bar-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-muted);
+    margin-left: auto;
+  }
+
+  .btn-export {
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-family: 'Cairo', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    border: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s;
+    color: white;
+  }
+
+  .btn-export:hover { transform: translateY(-1px); filter: brightness(1.1); }
+
+  .btn-export-xl  { background: linear-gradient(135deg,#166534,#22c55e); box-shadow:0 4px 15px rgba(34,197,94,.3); }
+  .btn-export-rpt { background: linear-gradient(135deg,#1d4ed8,#7c3aed); box-shadow:0 4px 15px rgba(124,58,237,.3); }
+
+  /* Setup modal */
+  .setup-step {
+    font-size: 13px; color: var(--text); margin-bottom: 10px;
+    display: flex; align-items: flex-start; gap: 10px; line-height: 1.6;
+  }
+  .step-num {
+    background: linear-gradient(135deg,var(--accent2),var(--accent));
+    color: white; border-radius: 50%; width: 22px; height: 22px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 800; flex-shrink: 0; margin-top: 1px;
+  }
+  .setup-code {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 16px; font-family: monospace; font-size: 12px; color: var(--accent);
+    margin: 0 0 14px 0; white-space: pre; overflow-x: auto; direction: ltr;
+    text-align: left;
+  }
+
+  /* ── MODALS ── */
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 8000;
+    background: rgba(0,0,0,0.65);
+    backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.25s;
+  }
+  .modal-overlay.show { opacity: 1; pointer-events: all; }
+
+  .modal-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    width: 420px;
+    max-width: 94vw;
+    padding: 32px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.5);
+    transform: scale(0.88) translateY(20px);
+    transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+  }
+  .modal-overlay.show .modal-box { transform: scale(1) translateY(0); }
+
+  .modal-icon {
+    width: 60px; height: 60px;
+    border-radius: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; margin: 0 auto 16px;
+  }
+  .modal-icon-dup     { background: rgba(239,68,68,0.15); }
+  .modal-icon-expiry  { background: rgba(245,158,11,0.15); }
+
+  .modal-title {
+    text-align: center; font-size: 17px; font-weight: 800; margin-bottom: 8px;
+  }
+  .modal-sub {
+    text-align: center; font-size: 13px; color: var(--text-muted); margin-bottom: 20px;
+  }
+  .modal-msg {
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.2);
+    border-radius: 10px; padding: 14px 16px;
+    font-size: 13px; color: var(--text); line-height: 1.6;
+    margin-bottom: 20px;
+  }
+  .modal-close {
+    width: 100%; padding: 13px;
+    background: linear-gradient(135deg,var(--accent2),var(--accent));
+    border: none; border-radius: 12px;
+    font-family: 'Cairo',sans-serif; font-size: 14px; font-weight: 700;
+    color: white; cursor: pointer; transition: filter 0.2s;
+  }
+  .modal-close:hover { filter: brightness(1.1); }
+
+  /* Expiry alert rows */
+  .expiry-group-title { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+
+  .expiry-alert-row {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 14px; margin-bottom: 7px;
+  }
+  .expiry-alert-row.expired { border-color: rgba(239,68,68,0.3); }
+  .expiry-alert-row.soon    { border-color: rgba(245,158,11,0.3); }
+
+  .expiry-alert-name { flex: 1; font-size: 13px; font-weight: 600; }
+  .expiry-alert-date { font-size: 11px; color: var(--text-muted); }
+
+  .expiry-alert-badge {
+    padding: 3px 10px; border-radius: 8px; font-size: 11px; font-weight: 700;
+  }
+  .badge-expired { background:rgba(239,68,68,0.15); color:var(--danger); }
+  .badge-soon    { background:rgba(245,158,11,0.15); color:var(--warning); }
+
+  .expiry-modal-scroll { max-height: 300px; overflow-y: auto; margin-bottom: 18px; }
+  .expiry-modal-scroll::-webkit-scrollbar { width: 4px; }
+  .expiry-modal-scroll::-webkit-scrollbar-track { background: transparent; }
+  .expiry-modal-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  /* Bell notification button */
+  .notif-btn {
+    position: relative;
+    background: rgba(245,158,11,0.12);
+    border: 1px solid rgba(245,158,11,0.3);
+    border-radius: 10px; padding: 8px 14px;
+    font-family:'Cairo',sans-serif; font-size:13px; font-weight:700;
+    color: var(--warning); cursor: pointer; display:flex; align-items:center; gap:6px;
+    transition: all 0.2s;
+  }
+  .notif-btn:hover { background: rgba(245,158,11,0.2); }
+  .notif-dot {
+    position: absolute; top: -4px; left: -4px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--danger); border: 2px solid var(--bg);
+    display: none;
+  }
+  .notif-dot.active { display: block; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.3);opacity:.7} }
+
+  @media (max-width: 1100px) {
+    .main-grid { grid-template-columns: 1fr; }
+    .form-panel { position: static; }
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+    .analytics-grid { grid-template-columns: 1fr 1fr; }
+    .analytics-grid-wide { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Lock Screen -->
+<div id="lockScreen">
+  <div class="lock-card">
+    <div class="lock-icon-wrap">🔐</div>
+    <div class="lock-title">نظام إدارة المخزون</div>
+    <div class="lock-sub">أدخل الرمز السري للدخول</div>
+
+    <div class="pin-dots">
+      <div class="pin-dot" id="dot0"></div>
+      <div class="pin-dot" id="dot1"></div>
+      <div class="pin-dot" id="dot2"></div>
+      <div class="pin-dot" id="dot3"></div>
+    </div>
+
+    <div class="pin-grid">
+      <button class="pin-btn" onclick="pressPin('1')">1</button>
+      <button class="pin-btn" onclick="pressPin('2')">2</button>
+      <button class="pin-btn" onclick="pressPin('3')">3</button>
+      <button class="pin-btn" onclick="pressPin('4')">4</button>
+      <button class="pin-btn" onclick="pressPin('5')">5</button>
+      <button class="pin-btn" onclick="pressPin('6')">6</button>
+      <button class="pin-btn" onclick="pressPin('7')">7</button>
+      <button class="pin-btn" onclick="pressPin('8')">8</button>
+      <button class="pin-btn" onclick="pressPin('9')">9</button>
+      <button class="pin-btn zero" onclick="pressPin('0')">0</button>
+      <button class="pin-btn del" onclick="deletePin()">⌫</button>
+    </div>
+
+    <div class="lock-error-msg" id="lockError"></div>
+  </div>
+</div>
+
+<!-- Main Dashboard -->
+<div id="mainContent">
+<div class="container">
+
+  <!-- Setup Banner (shown when Supabase not configured) -->
+  <div id="setupBanner" style="display:none;align-items:center;gap:14px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:14px;padding:14px 20px;margin-bottom:20px;flex-wrap:wrap">
+    <span style="font-size:20px">⚙️</span>
+    <div style="flex:1">
+      <div style="font-size:13px;font-weight:800;color:var(--warning)">إعداد المزامنة السحابية مطلوب</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:3px">لمشاركة البيانات بين الأجهزة، أنشئ مشروعاً مجانياً في Supabase وأدخل بياناته أدناه</div>
+    </div>
+    <button onclick="document.getElementById('setupModal').classList.add('show')" style="background:linear-gradient(135deg,var(--accent2),var(--accent));border:none;color:white;padding:10px 18px;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:Cairo,sans-serif">⚙️ إعداد الآن</button>
+  </div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <div class="logo-icon">📦</div>
+      <div class="header-title">
+        <h1>نظام إدارة المخزون</h1>
+        <p>Inventory Management System</p>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div id="syncStatus" style="min-width:140px;text-align:center"></div>
+      <button id="cloudSetupBtn" onclick="document.getElementById('setupModal').classList.add('show')" style="background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.25);color:var(--accent);padding:8px 16px;border-radius:10px;font-family:Cairo,sans-serif;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;transition:all .2s" onmouseover="this.style.background='rgba(0,212,255,0.2)'" onmouseout="this.style.background='rgba(0,212,255,0.1)'">
+        ☁️ إعداد المزامنة
+      </button>
+      <button class="notif-btn" onclick="checkExpiryAlerts()" title="تنبيهات الصلاحية">
+        <div class="notif-dot" id="notifDot"></div>
+        🔔 تنبيهات الصلاحية
+      </button>
+      <div class="header-badge" id="dateBadge">📅 —</div>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-label"><span class="stat-dot" style="background:var(--accent)"></span>إجمالي الأصناف</div>
+      <div class="stat-value" id="statTotal">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label"><span class="stat-dot" style="background:var(--success)"></span>إجمالي المضاف</div>
+      <div class="stat-value" id="statAdded">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label"><span class="stat-dot" style="background:var(--danger)"></span>إجمالي المسحوب</div>
+      <div class="stat-value" id="statWithdrawn">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label"><span class="stat-dot" style="background:var(--warning)"></span>منتهية قريباً</div>
+      <div class="stat-value" id="statExpiring">0</div>
+    </div>
+  </div>
+
+  <!-- Main Grid -->
+  <div class="main-grid">
+
+    <!-- Form Panel -->
+    <div class="form-panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <div class="panel-title-icon">✏️</div>
+          <span>بيانات الصنف</span>
+        </div>
+        <span class="mode-badge mode-add" id="modeBadge">إضافة جديد</span>
+      </div>
+      <div class="form-body">
+        <input type="hidden" id="editIndex" value="">
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>رقم الصنف</label>
+            <input type="number" id="itemNumber" placeholder="مثال: 1001">
+          </div>
+          <div class="form-group">
+            <label>رقم نابكو</label>
+            <input type="number" id="napcoNumber" placeholder="مثال: 2002">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>اسم الصنف</label>
+          <input type="text" id="itemName" placeholder="أدخل اسم الصنف...">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>الكمية المتاحة</label>
+            <input type="number" id="availableQty" placeholder="0" min="0" oninput="calcRemaining()">
+          </div>
+          <div class="form-group">
+            <label>الكمية المضافة</label>
+            <input type="number" id="addedQty" placeholder="0" min="0" oninput="calcRemaining()">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>الكمية المسحوبة</label>
+            <input type="number" id="withdrawnQty" placeholder="0" min="0" oninput="calcRemaining()">
+          </div>
+          <div class="form-group">
+            <label>الكمية المتبقية</label>
+            <div class="remaining-display">
+              <span class="remaining-value" id="remainingDisplay">0</span>
+              <span class="remaining-label">محسوبة تلقائياً</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>تاريخ الانتهاء</label>
+            <input type="date" id="expiryDate">
+          </div>
+          <div class="form-group">
+            <label>الجهاز / الاستخدام</label>
+            <input type="text" id="device" placeholder="مثال: جهاز التحليل">
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button class="btn btn-primary" onclick="saveItem()">
+            <span id="saveIcon">＋</span>
+            <span id="saveText">حفظ الصنف</span>
+          </button>
+          <button class="btn btn-secondary" onclick="resetForm()">🔄 إعادة تعيين</button>
+          <button class="btn btn-secondary" onclick="exportData()">📥 تصدير JSON</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table Panel -->
+    <div class="table-panel">
+      <div class="table-header">
+        <div class="panel-title">
+          <div class="panel-title-icon">📋</div>
+          <span>قائمة المخزون</span>
+        </div>
+        <div class="search-box">
+          <input type="text" id="searchInput" placeholder="ابحث عن صنف..." oninput="renderTable()">
+          <span class="search-icon">🔍</span>
+        </div>
+      </div>
+
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>الصنف</th>
+              <th>رقم الصنف</th>
+              <th>رقم نابكو</th>
+              <th>المتاحة</th>
+              <th>المضافة</th>
+              <th>المسحوبة</th>
+              <th>المتبقية</th>
+              <th>الانتهاء</th>
+              <th>الجهاز</th>
+              <th>إجراء</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-footer">
+        <span id="tableInfo">لا توجد بيانات</span>
+        <span style="color:var(--accent);font-weight:600">نظام المخزون v1.0</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════ ANALYTICS SECTION ══════════ -->
+  <div class="analytics-section">
+
+    <!-- Export Bar -->
+    <div class="export-bar">
+      <span style="font-size:20px">📦</span>
+      <span style="font-weight:800;font-size:15px">تصدير وتحليل البيانات</span>
+      <button class="btn-export btn-export-xl" onclick="exportToExcel()">📗 تنزيل Excel</button>
+      <button class="btn-export btn-export-rpt" onclick="exportAnalyticsExcel()">📈 تقرير التحليل Excel</button>
+      <span class="export-bar-label" id="exportCount">0 صنف جاهز للتصدير</span>
+    </div>
+
+    <div class="section-title">
+      <div class="section-title-icon">📉</div>
+      تحليل بيانات المخزون
+    </div>
+
+    <div class="analytics-grid">
+      <div class="chart-card">
+        <div class="chart-card-header"><div class="chart-card-title">🔵 توزيع الكميات</div></div>
+        <div class="chart-canvas-wrap"><canvas id="chartQty"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-card-header"><div class="chart-card-title">🟢 حالة المخزون</div></div>
+        <div class="chart-canvas-wrap"><canvas id="chartStatus"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-card-header"><div class="chart-card-title">🟡 معدل الاستهلاك %</div></div>
+        <div class="chart-canvas-wrap"><canvas id="chartConsumption"></canvas></div>
+      </div>
+    </div>
+
+    <div class="analytics-grid-wide">
+      <div class="chart-card">
+        <div class="chart-card-header"><div class="chart-card-title">📊 مقارنة الأصناف — المضاف vs المسحوب vs المتبقي</div></div>
+        <div class="chart-canvas-wrap tall"><canvas id="chartBar"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-card-header"><div class="chart-card-title">🔍 ملخص الرؤى</div></div>
+        <div class="insight-list" id="insightList"></div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+</div><!-- /mainContent -->
+
+<!-- Setup / Config Modal -->
+<div class="modal-overlay" id="setupModal" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modal-box" style="width:540px;max-height:92vh;overflow-y:auto">
+    <div class="modal-icon" style="background:rgba(0,212,255,0.12);font-size:26px">☁️</div>
+    <div class="modal-title">إعداد المزامنة السحابية</div>
+    <div class="modal-sub">أدخل بيانات Supabase مرة واحدة وستُحفظ تلقائياً</div>
+
+    <!-- Step guide -->
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:20px;text-align:right">
+      <div style="font-size:12px;font-weight:800;color:var(--accent);margin-bottom:10px">📋 خطوات الإعداد (مرة واحدة فقط)</div>
+      <div class="setup-step"><span class="step-num">١</span> اذهب إلى <a href="https://supabase.com" target="_blank" style="color:var(--accent);text-decoration:none">supabase.com ↗</a> وأنشئ حساباً مجانياً</div>
+      <div class="setup-step"><span class="step-num">٢</span> اضغط <b>New Project</b> واختر اسماً وكلمة سر</div>
+      <div class="setup-step"><span class="step-num">٣</span> اذهب إلى <b>SQL Editor</b> واضغط <b>New Query</b> وشغّل هذا:</div>
+      <div class="setup-code" onclick="copySQL(this)" title="اضغط للنسخ" style="cursor:pointer">CREATE TABLE inventory (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  data jsonb NOT NULL DEFAULT '[]',
+  updated_at timestamptz DEFAULT now()
+);
+INSERT INTO inventory (data) VALUES ('[]'::jsonb);
+-- السماح بالقراءة والكتابة
+CREATE POLICY "allow all" ON inventory FOR ALL USING (true) WITH CHECK (true);
+ALTER TABLE inventory ENABLE ROW LEVEL SECURITY;</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;margin-right:32px">💡 اضغط على الكود لنسخه</div>
+      <div class="setup-step"><span class="step-num">٤</span> اذهب إلى <b>Settings → API</b> وانسخ <b>Project URL</b> و <b>anon public key</b></div>
+      <div class="setup-step"><span class="step-num">٥</span> أدخلهما في الحقول أدناه واضغط <b>حفظ وتفعيل</b></div>
+    </div>
+
+    <!-- Input fields -->
+    <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:20px">
+      <div>
+        <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Project URL</label>
+        <input id="cfgUrl" type="text" placeholder="https://xxxxxxxxxx.supabase.co"
+          style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-family:monospace;font-size:13px;direction:ltr">
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Anon Public Key</label>
+        <input id="cfgKey" type="password" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+          style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-family:monospace;font-size:13px;direction:ltr">
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">🔒 محفوظ محلياً فقط في متصفحك</div>
+      </div>
+    </div>
+
+    <div id="cfgStatus" style="min-height:20px;margin-bottom:12px;font-size:13px;text-align:center"></div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <button class="modal-close" style="background:linear-gradient(135deg,#166534,#22c55e)" onclick="saveConfig()">💾 حفظ وتفعيل</button>
+      <button class="modal-close" style="background:var(--surface2);color:var(--text-muted);border:1px solid var(--border)" onclick="testConnection()">🔌 اختبار الاتصال</button>
+    </div>
+    <button onclick="document.getElementById('setupModal').classList.remove('show')" style="width:100%;margin-top:10px;background:transparent;border:none;color:var(--text-muted);font-family:Cairo,sans-serif;font-size:13px;cursor:pointer;padding:8px">إغلاق</button>
+  </div>
+</div>
+
+<!-- Duplicate Alert Modal -->
+<div class="modal-overlay" id="dupModal" onclick="if(event.target===this)closeDupModal()">
+  <div class="modal-box">
+    <div class="modal-icon modal-icon-dup">🚫</div>
+    <div class="modal-title">تكرار في البيانات</div>
+    <div class="modal-sub">لا يمكن إضافة صنف بنفس الرقم المستخدم</div>
+    <div class="modal-msg" id="dupMsg"></div>
+    <button class="modal-close" onclick="closeDupModal()">حسناً، سأصحح البيانات</button>
+  </div>
+</div>
+
+<!-- Expiry Alert Modal -->
+<div class="modal-overlay" id="expiryModal" onclick="if(event.target===this)closeExpiryModal()">
+  <div class="modal-box">
+    <div class="modal-icon modal-icon-expiry">⏰</div>
+    <div class="modal-title">تنبيه انتهاء الصلاحية</div>
+    <div class="modal-sub">الأصناف التالية تحتاج إلى مراجعة عاجلة</div>
+    <div class="expiry-modal-scroll" id="expiryAlertBody"></div>
+    <button class="modal-close" onclick="closeExpiryModal()">✓ تم الاطلاع</button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast">
+  <span id="toastIcon">✓</span>
+  <span id="toastMsg">تم الحفظ بنجاح</span>
+</div>
+
+<script>
+  // ── PIN LOCK ──
+  const CORRECT_PIN = '1234';
+  let pinEntry = '';
+
+  function pressPin(digit) {
+    if (pinEntry.length >= 4) return;
+    pinEntry += digit;
+    updateDots();
+    if (pinEntry.length === 4) {
+      setTimeout(checkPin, 200);
+    }
+  }
+
+  function deletePin() {
+    pinEntry = pinEntry.slice(0, -1);
+    updateDots();
+    clearError();
+  }
+
+  function updateDots() {
+    for (let i = 0; i < 4; i++) {
+      const dot = document.getElementById('dot' + i);
+      dot.className = 'pin-dot' + (i < pinEntry.length ? ' filled' : '');
+    }
+  }
+
+  function checkPin() {
+    if (pinEntry === CORRECT_PIN) {
+      // Success: animate and show dashboard
+      const card = document.querySelector('.lock-card');
+      card.style.transition = 'all 0.4s ease';
+      card.style.transform = 'scale(1.05)';
+      card.style.opacity = '0';
+      setTimeout(() => {
+        document.getElementById('lockScreen').style.display = 'none';
+        document.getElementById('mainContent').style.display = 'block';
+        setTimeout(() => document.dispatchEvent(new Event('dashboardReady')), 100);
+      }, 400);
+    } else {
+      // Error: shake dots
+      for (let i = 0; i < 4; i++) {
+        const dot = document.getElementById('dot' + i);
+        dot.className = 'pin-dot error';
+      }
+      document.getElementById('lockError').textContent = '❌ رمز سري خاطئ، حاول مرة أخرى';
+      setTimeout(() => {
+        pinEntry = '';
+        updateDots();
+        clearError();
+      }, 1000);
+    }
+  }
+
+  function clearError() {
+    document.getElementById('lockError').textContent = '';
+  }
+
+  // Allow keyboard input on lock screen
+  document.addEventListener('keydown', (e) => {
+    if (document.getElementById('lockScreen').style.display === 'none') return;
+    if (e.key >= '0' && e.key <= '9') pressPin(e.key);
+    if (e.key === 'Backspace') deletePin();
+  });
+</script>
+
+<script>
+  // ══════════════════════════════════════════
+  //  ☁️  SUPABASE CLOUD — يُقرأ من localStorage
+  // ══════════════════════════════════════════
+
+  const CFG_KEY = 'sb_config_v1';
+
+  function loadConfig() {
+    try { const c = localStorage.getItem(CFG_KEY); return c ? JSON.parse(c) : null; } catch(e){ return null; }
+  }
+
+  function getSupabaseCreds() {
+    const cfg = loadConfig();
+    return {
+      url: cfg?.url || '',
+      key: cfg?.key || ''
+    };
+  }
+
+  function isConfigured() {
+    const { url, key } = getSupabaseCreds();
+    return url.startsWith('https://') && key.length > 20;
+  }
+
+  // Pre-fill inputs if already saved
+  window.addEventListener('DOMContentLoaded', () => {
+    const cfg = loadConfig();
+    if (cfg?.url) document.getElementById('cfgUrl').value = cfg.url;
+    if (cfg?.key) document.getElementById('cfgKey').value = cfg.key;
+  });
+
+  function saveConfig() {
+    const url = document.getElementById('cfgUrl').value.trim();
+    const key = document.getElementById('cfgKey').value.trim();
+    const status = document.getElementById('cfgStatus');
+    if (!url.startsWith('https://') || key.length < 20) {
+      status.innerHTML = '<span style="color:var(--danger)">❌ يرجى إدخال بيانات صحيحة</span>';
+      return;
+    }
+    localStorage.setItem(CFG_KEY, JSON.stringify({ url, key }));
+    status.innerHTML = '<span style="color:var(--success)">✅ تم الحفظ — جاري الاتصال...</span>';
+    // Update header button to green
+    const btn = document.getElementById('cloudSetupBtn');
+    if (btn) {
+      btn.style.background = 'rgba(16,185,129,0.15)';
+      btn.style.borderColor = 'rgba(16,185,129,0.4)';
+      btn.style.color = 'var(--success)';
+      btn.innerHTML = '✅ المزامنة مفعّلة';
+    }
+    setTimeout(() => {
+      document.getElementById('setupModal').classList.remove('show');
+      document.getElementById('setupBanner').style.display = 'none';
+      initCloudData();
+    }, 1000);
+  }
+
+  async function testConnection() {
+    const url = document.getElementById('cfgUrl').value.trim();
+    const key = document.getElementById('cfgKey').value.trim();
+    const status = document.getElementById('cfgStatus');
+    if (!url || !key) { status.innerHTML = '<span style="color:var(--danger)">❌ أدخل البيانات أولاً</span>'; return; }
+    status.innerHTML = '<span style="color:var(--text-muted)">🔄 جاري الاختبار...</span>';
+    try {
+      const res = await fetch(`${url}/rest/v1/inventory?select=id&limit=1`, {
+        headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
+      });
+      if (res.ok) {
+        status.innerHTML = '<span style="color:var(--success)">✅ الاتصال ناجح! يمكنك الحفظ الآن</span>';
+      } else {
+        const err = await res.text();
+        status.innerHTML = `<span style="color:var(--danger)">❌ فشل: ${res.status} — تأكد من إنشاء جدول inventory</span>`;
+      }
+    } catch(e) {
+      status.innerHTML = '<span style="color:var(--danger)">❌ لا يمكن الوصول — تحقق من الرابط</span>';
+    }
+  }
+
+  function copySQL(el) {
+    navigator.clipboard.writeText(el.innerText).then(() => {
+      const orig = el.style.border;
+      el.style.border = '1px solid var(--success)';
+      showToast('✅ تم نسخ SQL', 'success');
+      setTimeout(() => el.style.border = orig, 1500);
+    });
+  }
+
+  // TABLE name
+  const TABLE = 'inventory';
+
+  // ── Supabase API helpers ──
+  async function sbFetch(path, options = {}) {
+    const { url, key } = getSupabaseCreds();
+    const res = await fetch(`${url}/rest/v1/${path}`, {
+      ...options,
+      headers: {
+        'apikey': key,
+        'Authorization': `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation',
+        ...(options.headers || {})
+      }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+  }
+
+  async function cloudLoad() {
+    const rows = await sbFetch(`${TABLE}?select=id,data&order=updated_at.desc&limit=1`);
+    if (rows && rows.length > 0) {
+      cloudRowId = rows[0].id;
+      return rows[0].data;
+    }
+    return null;
+  }
+
+  async function cloudSave(data) {
+    if (cloudRowId) {
+      await sbFetch(`${TABLE}?id=eq.${cloudRowId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ data, updated_at: new Date().toISOString() })
+      });
+    } else {
+      const rows = await sbFetch(TABLE, {
+        method: 'POST',
+        body: JSON.stringify({ data })
+      });
+      if (rows && rows[0]) cloudRowId = rows[0].id;
+    }
+  }
+
+  let cloudRowId = null;
+  let syncTimeout = null;
+
+  // ── localStorage fallback ──
+  const STORAGE_KEY = 'inventory_data_v1';
+  function saveToLocal() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(inventory)); } catch(e) {}
+  }
+  function loadFromLocal() {
+    try { const s = localStorage.getItem(STORAGE_KEY); return s ? JSON.parse(s) : null; } catch(e) { return null; }
+  }
+
+  // ── Unified save (cloud + local backup) ──
+  function saveToStorage() {
+    saveToLocal();
+    if (!isConfigured()) return;
+    clearTimeout(syncTimeout);
+    syncTimeout = setTimeout(async () => {
+      try {
+        showSyncStatus('syncing');
+        await cloudSave(inventory);
+        showSyncStatus('synced');
+      } catch(e) {
+        showSyncStatus('error');
+      }
+    }, 800);
+  }
+
+  // ── Sync status indicator ──
+  function showSyncStatus(state) {
+    const el = document.getElementById('syncStatus');
+    if (!el) return;
+    const states = {
+      syncing: { icon: '🔄', text: 'جاري المزامنة...', color: 'var(--text-muted)' },
+      synced:  { icon: '☁️', text: 'تمت المزامنة',    color: 'var(--success)'    },
+      error:   { icon: '⚠️', text: 'خطأ في المزامنة', color: 'var(--warning)'    },
+      offline: { icon: '💾', text: 'حفظ محلي فقط',    color: 'var(--text-muted)' },
+    };
+    const s = states[state] || states.offline;
+    el.innerHTML = `<span style="color:${s.color};font-size:12px;font-weight:600">${s.icon} ${s.text}</span>`;
+  }
+
+  // ── Init: load from cloud, fallback to local ──
+  const defaultInventory = [
+    { itemNumber: 11, napcoNumber: 22, itemName: 'test', availableQty: 5, addedQty: 2, withdrawnQty: 1, expiryDate: '', device: '' },
+    { itemNumber: 22, napcoNumber: 33, itemName: 'r',    availableQty: 300, addedQty: 89, withdrawnQty: 77, expiryDate: '', device: '' }
+  ];
+
+  let inventory = loadFromLocal() || defaultInventory;
+
+  // Load from cloud after unlock
+  async function initCloudData() {
+    if (!isConfigured()) {
+      showSyncStatus('offline');
+      showSetupBanner();
+      return;
+    }
+    // Already configured — update header button
+    const btn = document.getElementById('cloudSetupBtn');
+    if (btn) {
+      btn.style.background = 'rgba(16,185,129,0.15)';
+      btn.style.borderColor = 'rgba(16,185,129,0.4)';
+      btn.style.color = 'var(--success)';
+      btn.innerHTML = '✅ المزامنة مفعّلة';
+    }
+    // Pre-fill config modal inputs
+    const cfg = loadConfig();
+    if (cfg?.url) document.getElementById('cfgUrl').value = cfg.url;
+    if (cfg?.key) document.getElementById('cfgKey').value = cfg.key;
+    showSyncStatus('syncing');
+    try {
+      const cloudData = await cloudLoad();
+      if (cloudData && Array.isArray(cloudData)) {
+        inventory = cloudData;
+        saveToLocal();
+        renderTable();
+        renderCharts();
+        checkExpiryAlerts();
+      }
+      showSyncStatus('synced');
+
+      // ── Real-time polling every 15s ──
+      setInterval(async () => {
+        try {
+          const fresh = await cloudLoad();
+          if (fresh && JSON.stringify(fresh) !== JSON.stringify(inventory)) {
+            inventory = fresh;
+            saveToLocal();
+            renderTable();
+            renderCharts();
+            showSyncStatus('synced');
+            showToast('🔄 تم تحديث البيانات من جهاز آخر', 'success');
+          }
+        } catch(e) {}
+      }, 15000);
+
+    } catch(e) {
+      showSyncStatus('error');
+      showToast('⚠️ تعذّر الاتصال بالسحابة — يعمل محلياً', 'error');
+    }
+  }
+
+  // ── Setup banner when not configured ──
+  function showSetupBanner() {
+    const banner = document.getElementById('setupBanner');
+    if (banner) {
+      banner.style.display = 'flex';
+      banner.style.alignItems = 'center';
+    }
+  }
+
+
+  function getRemaining(item) {
+    return (item.availableQty || 0) + (item.addedQty || 0) - (item.withdrawnQty || 0);
+  }
+
+  function calcRemaining() {
+    const av = parseFloat(document.getElementById('availableQty').value) || 0;
+    const ad = parseFloat(document.getElementById('addedQty').value) || 0;
+    const wd = parseFloat(document.getElementById('withdrawnQty').value) || 0;
+    const rem = av + ad - wd;
+    document.getElementById('remainingDisplay').textContent = rem;
+    document.getElementById('remainingDisplay').style.color =
+      rem <= 0 ? 'var(--danger)' : rem < 20 ? 'var(--warning)' : 'var(--accent)';
+  }
+
+  function getExpiryStatus(dateStr) {
+    if (!dateStr) return { label: '—', cls: 'expiry-none' };
+    const today = new Date();
+    const exp = new Date(dateStr);
+    const diff = (exp - today) / (1000 * 60 * 60 * 24);
+    if (diff < 0) return { label: formatDate(dateStr) + ' (منتهي)', cls: 'expiry-expired' };
+    if (diff <= 30) return { label: formatDate(dateStr) + ' (قريباً)', cls: 'expiry-soon' };
+    return { label: formatDate(dateStr), cls: 'expiry-valid' };
+  }
+
+  function formatDate(str) {
+    if (!str) return '—';
+    const d = new Date(str);
+    return d.toLocaleDateString('ar-SA', { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  function getInitials(name) {
+    return name ? name.charAt(0).toUpperCase() : '?';
+  }
+
+  function renderTable() {
+    const search = document.getElementById('searchInput').value.toLowerCase();
+    const tbody = document.getElementById('tableBody');
+    const filtered = inventory.filter(item =>
+      item.itemName.toLowerCase().includes(search) ||
+      String(item.itemNumber).includes(search) ||
+      String(item.napcoNumber).includes(search) ||
+      (item.device || '').toLowerCase().includes(search)
+    );
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="10">
+        <div class="empty-state">
+          <div class="empty-icon">📭</div>
+          <div>لا توجد أصناف مطابقة</div>
+        </div>
+      </td></tr>`;
+      document.getElementById('tableInfo').textContent = 'لا توجد نتائج';
+      return;
+    }
+
+    tbody.innerHTML = filtered.map((item, fi) => {
+      const realIdx = inventory.indexOf(item);
+      const rem = getRemaining(item);
+      const remCls = rem <= 0 ? 'qty-remaining-zero' : rem < 20 ? 'qty-remaining-low' : 'qty-remaining-high';
+      const exp = getExpiryStatus(item.expiryDate);
+
+      return `<tr onclick="selectRow(${realIdx})" id="row-${realIdx}">
+        <td>
+          <div class="item-name-cell">
+            <div class="item-avatar">${getInitials(item.itemName)}</div>
+            <span>${item.itemName || '—'}</span>
+          </div>
+        </td>
+        <td>${item.itemNumber || '—'}</td>
+        <td>${item.napcoNumber || '—'}</td>
+        <td><span class="qty-badge qty-available">${item.availableQty ?? 0}</span></td>
+        <td><span class="qty-badge qty-added">+${item.addedQty ?? 0}</span></td>
+        <td><span class="qty-badge qty-withdrawn">-${item.withdrawnQty ?? 0}</span></td>
+        <td><span class="qty-badge ${remCls}">${rem}</span></td>
+        <td><span class="expiry-badge ${exp.cls}">${exp.label}</span></td>
+        <td>${item.device || '—'}</td>
+        <td>
+          <div class="action-btns" onclick="event.stopPropagation()">
+            <button class="action-btn btn-edit" onclick="editItem(${realIdx})" title="تعديل">✏️</button>
+            <button class="action-btn btn-delete" onclick="deleteItem(${realIdx})" title="حذف">🗑️</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('tableInfo').textContent = `عدد الأصناف: ${filtered.length} | إجمالي: ${inventory.length}`;
+    updateStats();
+  }
+
+  function selectRow(idx) {
+    document.querySelectorAll('tbody tr').forEach(r => r.classList.remove('selected'));
+    const row = document.getElementById(`row-${idx}`);
+    if (row) row.classList.add('selected');
+  }
+
+  function saveItem() {
+    const name = document.getElementById('itemName').value.trim();
+    if (!name) { showToast('يرجى إدخال اسم الصنف', 'error'); return; }
+
+    const itemNum   = parseFloat(document.getElementById('itemNumber').value) || 0;
+    const napcoNum  = parseFloat(document.getElementById('napcoNumber').value) || 0;
+    const editIdx   = document.getElementById('editIndex').value;
+    const editIdxInt = editIdx !== '' ? parseInt(editIdx) : -1;
+
+    // ── Duplicate check ──
+    const dupItem = inventory.findIndex((it, i) => {
+      if (i === editIdxInt) return false; // skip self when editing
+      return it.itemNumber === itemNum || it.napcoNumber === napcoNum;
+    });
+
+    if (dupItem !== -1) {
+      const dup = inventory[dupItem];
+      let msg = '';
+      if (dup.itemNumber === itemNum && dup.napcoNumber === napcoNum)
+        msg = `رقم الصنف "${itemNum}" ورقم نابكو "${napcoNum}" مستخدمان مسبقاً في الصنف: "${dup.itemName}"`;
+      else if (dup.itemNumber === itemNum)
+        msg = `رقم الصنف "${itemNum}" مستخدم مسبقاً في الصنف: "${dup.itemName}"`;
+      else
+        msg = `رقم نابكو "${napcoNum}" مستخدم مسبقاً في الصنف: "${dup.itemName}"`;
+      showDuplicateAlert(msg);
+      return;
+    }
+
+    const item = {
+      itemNumber: itemNum,
+      napcoNumber: napcoNum,
+      itemName: name,
+      availableQty: parseFloat(document.getElementById('availableQty').value) || 0,
+      addedQty: parseFloat(document.getElementById('addedQty').value) || 0,
+      withdrawnQty: parseFloat(document.getElementById('withdrawnQty').value) || 0,
+      expiryDate: document.getElementById('expiryDate').value,
+      device: document.getElementById('device').value.trim()
+    };
+
+    if (editIdxInt !== -1) {
+      inventory[editIdxInt] = item;
+      showToast('تم تحديث الصنف بنجاح ✓', 'success');
+    } else {
+      inventory.push(item);
+      showToast('تمت إضافة الصنف بنجاح ✓', 'success');
+    }
+
+    saveToStorage();
+    resetForm();
+    renderTable();
+    renderCharts();
+    checkExpiryAlerts();
+  }
+
+  function editItem(idx) {
+    const item = inventory[idx];
+    document.getElementById('editIndex').value = idx;
+    document.getElementById('itemNumber').value = item.itemNumber;
+    document.getElementById('napcoNumber').value = item.napcoNumber;
+    document.getElementById('itemName').value = item.itemName;
+    document.getElementById('availableQty').value = item.availableQty;
+    document.getElementById('addedQty').value = item.addedQty;
+    document.getElementById('withdrawnQty').value = item.withdrawnQty;
+    document.getElementById('expiryDate').value = item.expiryDate;
+    document.getElementById('device').value = item.device;
+
+    document.getElementById('modeBadge').textContent = 'تعديل';
+    document.getElementById('modeBadge').className = 'mode-badge mode-edit';
+    document.getElementById('saveText').textContent = 'حفظ التعديلات';
+    document.getElementById('saveIcon').textContent = '💾';
+    calcRemaining();
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    showToast('جاهز للتعديل', 'success');
+  }
+
+  function deleteItem(idx) {
+    if (!confirm(`هل أنت متأكد من حذف "${inventory[idx].itemName}"؟`)) return;
+    inventory.splice(idx, 1);
+    saveToStorage();
+    renderTable();
+    renderCharts();
+    showToast('تم حذف الصنف', 'error');
+  }
+
+  function resetForm() {
+    document.getElementById('editIndex').value = '';
+    ['itemNumber','napcoNumber','itemName','availableQty','addedQty','withdrawnQty','expiryDate','device']
+      .forEach(id => document.getElementById(id).value = '');
+    document.getElementById('remainingDisplay').textContent = '0';
+    document.getElementById('remainingDisplay').style.color = 'var(--accent)';
+    document.getElementById('modeBadge').textContent = 'إضافة جديد';
+    document.getElementById('modeBadge').className = 'mode-badge mode-add';
+    document.getElementById('saveText').textContent = 'حفظ الصنف';
+    document.getElementById('saveIcon').textContent = '＋';
+    // Clear field error highlights
+    ['itemNumber','napcoNumber'].forEach(id => {
+      document.getElementById(id).style.borderColor = '';
+    });
+  }
+
+  // ── DUPLICATE ALERT ──
+  function showDuplicateAlert(msg) {
+    document.getElementById('dupMsg').textContent = msg;
+    document.getElementById('dupModal').classList.add('show');
+    // Highlight the duplicate fields in red
+    ['itemNumber','napcoNumber'].forEach(id => {
+      document.getElementById(id).style.borderColor = 'var(--danger)';
+      document.getElementById(id).style.boxShadow = '0 0 0 3px rgba(239,68,68,0.15)';
+    });
+  }
+
+  function closeDupModal() {
+    document.getElementById('dupModal').classList.remove('show');
+  }
+
+  // ── EXPIRY ALERTS ──
+  function checkExpiryAlerts() {
+    const today = new Date();
+    const alertItems = inventory.filter(i => {
+      if (!i.expiryDate) return false;
+      const diff = (new Date(i.expiryDate) - today) / (1000 * 60 * 60 * 24);
+      return diff >= 0 && diff <= 30;
+    });
+    const expiredItems = inventory.filter(i => {
+      if (!i.expiryDate) return false;
+      return (new Date(i.expiryDate) - today) < 0;
+    });
+
+    // Toggle notification dot
+    const dot = document.getElementById('notifDot');
+    if (dot) dot.className = 'notif-dot' + (alertItems.length || expiredItems.length ? ' active' : '');
+
+    if (alertItems.length === 0 && expiredItems.length === 0) return;
+
+    let html = '';
+    if (expiredItems.length > 0) {
+      html += `<div class="expiry-group-title" style="color:var(--danger)">❌ منتهية الصلاحية (${expiredItems.length})</div>`;
+      expiredItems.forEach(it => {
+        html += `<div class="expiry-alert-row expired">
+          <span class="expiry-alert-name">${it.itemName}</span>
+          <span class="expiry-alert-date">${formatDate(it.expiryDate)}</span>
+          <span class="expiry-alert-badge badge-expired">منتهي</span>
+        </div>`;
+      });
+    }
+    if (alertItems.length > 0) {
+      html += `<div class="expiry-group-title" style="color:var(--warning);margin-top:${expiredItems.length?'16px':'0'}">⚠️ تنتهي خلال 30 يوم (${alertItems.length})</div>`;
+      alertItems.sort((a,b) => new Date(a.expiryDate)-new Date(b.expiryDate)).forEach(it => {
+        const days = Math.ceil((new Date(it.expiryDate) - today) / (1000*60*60*24));
+        html += `<div class="expiry-alert-row soon">
+          <span class="expiry-alert-name">${it.itemName}</span>
+          <span class="expiry-alert-date">${formatDate(it.expiryDate)}</span>
+          <span class="expiry-alert-badge badge-soon">${days} يوم</span>
+        </div>`;
+      });
+    }
+
+    document.getElementById('expiryAlertBody').innerHTML = html;
+    document.getElementById('expiryModal').classList.add('show');
+  }
+
+  function closeExpiryModal() {
+    document.getElementById('expiryModal').classList.remove('show');
+  }
+
+  function updateStats() {
+    document.getElementById('statTotal').textContent = inventory.length;
+    document.getElementById('statAdded').textContent = inventory.reduce((s,i) => s + (i.addedQty||0), 0);
+    document.getElementById('statWithdrawn').textContent = inventory.reduce((s,i) => s + (i.withdrawnQty||0), 0);
+    const today = new Date();
+    const expiring = inventory.filter(i => {
+      if (!i.expiryDate) return false;
+      const diff = (new Date(i.expiryDate) - today) / (1000*60*60*24);
+      return diff >= 0 && diff <= 30;
+    }).length;
+    document.getElementById('statExpiring').textContent = expiring;
+  }
+
+  function exportData() {
+    const json = JSON.stringify(inventory, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'inventory.json';
+    a.click();
+    showToast('تم تصدير البيانات بنجاح', 'success');
+  }
+
+  // ── EXCEL EXPORT ──
+  function exportToExcel() {
+    if (inventory.length === 0) { showToast('لا توجد بيانات للتصدير', 'error'); return; }
+    const rows = [
+      ['رقم الصنف','رقم نابكو','اسم الصنف','الكمية المتاحة','الكمية المضافة','الكمية المسحوبة','الكمية المتبقية','تاريخ الانتهاء','الجهاز']
+    ];
+    inventory.forEach(item => rows.push([
+      item.itemNumber, item.napcoNumber, item.itemName,
+      item.availableQty, item.addedQty, item.withdrawnQty,
+      getRemaining(item), item.expiryDate||'', item.device||''
+    ]));
+    MiniXLSX.download(rows, 'inventory_data.csv');
+    showToast('✅ تم تنزيل ملف Excel (CSV) بنجاح', 'success');
+  }
+
+  function exportAnalyticsExcel() {
+    if (inventory.length === 0) { showToast('لا توجد بيانات للتحليل', 'error'); return; }
+    const totalAdded     = inventory.reduce((s,i)=>s+(i.addedQty||0),0);
+    const totalWithdrawn = inventory.reduce((s,i)=>s+(i.withdrawnQty||0),0);
+    const totalAvail     = inventory.reduce((s,i)=>s+(i.availableQty||0),0);
+    const totalRemaining = inventory.reduce((s,i)=>s+getRemaining(i),0);
+    const today = new Date();
+    const expired  = inventory.filter(i=>i.expiryDate&&(new Date(i.expiryDate)-today)<0).length;
+    const expSoon  = inventory.filter(i=>{if(!i.expiryDate)return false;const d=(new Date(i.expiryDate)-today)/86400000;return d>=0&&d<=30;}).length;
+    const zeroStock= inventory.filter(i=>getRemaining(i)<=0).length;
+    const lowStock = inventory.filter(i=>getRemaining(i)>0&&getRemaining(i)<20).length;
+    const highItem = inventory.reduce((a,b)=>getRemaining(a)>=getRemaining(b)?a:b, inventory[0]);
+    const consumRate= totalAdded>0?Math.round((totalWithdrawn/totalAdded)*100):0;
+
+    const rows = [
+      ['اسم الصنف','رقم الصنف','رقم نابكو','المتاحة','المضافة','المسحوبة','المتبقية','معدل الاستهلاك%','الحالة','تاريخ الانتهاء','الجهاز'],
+      ...inventory.map(i=>{
+        const rem=getRemaining(i);
+        const rate=i.addedQty>0?Math.round((i.withdrawnQty/i.addedQty)*100):0;
+        const status=rem<=0?'نفد':rem<20?'منخفض':'جيد';
+        return [i.itemName,i.itemNumber,i.napcoNumber,i.availableQty,i.addedQty,i.withdrawnQty,rem,rate+'%',status,i.expiryDate||'',i.device||''];
+      }),
+      [],
+      ['=== ملخص التحليل ==='],
+      ['إجمالي الأصناف', inventory.length],
+      ['إجمالي المتاحة', totalAvail],
+      ['إجمالي المضافة', totalAdded],
+      ['إجمالي المسحوبة', totalWithdrawn],
+      ['إجمالي المتبقية', totalRemaining],
+      ['معدل الاستهلاك %', consumRate+'%'],
+      ['منتهية الصلاحية', expired],
+      ['تنتهي خلال 30 يوم', expSoon],
+      ['نفدت (صفر)', zeroStock],
+      ['منخفض (<20)', lowStock],
+      ['أعلى مخزوناً', highItem?highItem.itemName:'—'],
+    ];
+    MiniXLSX.download(rows, 'inventory_analytics_report.csv');
+    showToast('✅ تم تنزيل تقرير التحليل بنجاح', 'success');
+  }
+
+  // ── CHARTS (MiniChart - no external libs) ──
+  function renderCharts() {
+    if (inventory.length === 0) return;
+
+    const names     = inventory.map(i => i.itemName.length > 8 ? i.itemName.slice(0,8)+'…' : i.itemName);
+    const added     = inventory.map(i => i.addedQty || 0);
+    const withdrawn = inventory.map(i => i.withdrawnQty || 0);
+    const remaining = inventory.map(i => getRemaining(i));
+
+    const C = {
+      blue:   'rgba(0,212,255,0.9)',
+      green:  'rgba(16,185,129,0.9)',
+      red:    'rgba(239,68,68,0.9)',
+      yellow: 'rgba(245,158,11,0.9)',
+    };
+
+    // Chart 1 — Doughnut: totals
+    MiniChart.doughnut(
+      document.getElementById('chartQty'),
+      ['المضاف','المسحوب','المتبقي'],
+      [
+        inventory.reduce((s,i)=>s+(i.addedQty||0),0),
+        inventory.reduce((s,i)=>s+(i.withdrawnQty||0),0),
+        inventory.reduce((s,i)=>s+getRemaining(i),0)
+      ],
+      [C.green, C.red, C.blue]
+    );
+
+    // Chart 2 — Pie: stock status
+    const good = inventory.filter(i=>getRemaining(i)>=20).length;
+    const low  = inventory.filter(i=>getRemaining(i)>0&&getRemaining(i)<20).length;
+    const zero = inventory.filter(i=>getRemaining(i)<=0).length;
+    MiniChart.pie(
+      document.getElementById('chartStatus'),
+      ['مخزون جيد','منخفض','نفد'],
+      [good, low, zero],
+      [C.green, C.yellow, C.red]
+    );
+
+    // Chart 3 — Horizontal bar: consumption rate
+    const rates      = inventory.map(i => i.addedQty > 0 ? Math.round((i.withdrawnQty/i.addedQty)*100) : 0);
+    const rateColors = rates.map(r => r>=80 ? C.red : r>=50 ? C.yellow : C.green);
+    MiniChart.hbar(document.getElementById('chartConsumption'), names, rates, rateColors);
+
+    // Chart 4 — Grouped bar
+    MiniChart.groupBar(
+      document.getElementById('chartBar'),
+      names,
+      [
+        { label:'المضاف',  data:added,     color:C.green  },
+        { label:'المسحوب', data:withdrawn, color:C.red    },
+        { label:'المتبقي', data:remaining, color:C.blue   },
+      ]
+    );
+
+    renderInsights();
+    document.getElementById('exportCount').textContent = inventory.length + ' صنف جاهز للتصدير';
+  }
+
+  function renderInsights() {
+    const today = new Date();
+    const totalAdded     = inventory.reduce((s,i)=>s+(i.addedQty||0),0);
+    const totalWithdrawn = inventory.reduce((s,i)=>s+(i.withdrawnQty||0),0);
+    const totalRemaining = inventory.reduce((s,i)=>s+getRemaining(i),0);
+    const consumRate     = totalAdded > 0 ? Math.round((totalWithdrawn/totalAdded)*100) : 0;
+    const expired  = inventory.filter(i=>i.expiryDate&&(new Date(i.expiryDate)-today)<0).length;
+    const expSoon  = inventory.filter(i=>{if(!i.expiryDate)return false;const d=(new Date(i.expiryDate)-today)/86400000;return d>=0&&d<=30;}).length;
+    const zeroStock= inventory.filter(i=>getRemaining(i)<=0).length;
+    const highItem = inventory.reduce((a,b)=>getRemaining(a)>=getRemaining(b)?a:b, inventory[0]);
+
+    const items = [
+      { icon:'📦', bg:'rgba(0,212,255,0.15)',  label:'إجمالي المتبقي',      val: totalRemaining },
+      { icon:'📈', bg:'rgba(16,185,129,0.15)', label:'معدل الاستهلاك',      val: consumRate + '%' },
+      { icon:'⚠️', bg:'rgba(245,158,11,0.15)', label:'تنتهي خلال 30 يوم',   val: expSoon },
+      { icon:'❌', bg:'rgba(239,68,68,0.15)',  label:'منتهية الصلاحية',     val: expired },
+      { icon:'🚨', bg:'rgba(239,68,68,0.15)',  label:'أصناف نفدت',          val: zeroStock },
+      { icon:'🏆', bg:'rgba(124,58,237,0.15)', label:'أعلى مخزون',          val: highItem ? highItem.itemName.slice(0,14) : '—' },
+    ];
+
+    document.getElementById('insightList').innerHTML = items.map(it => `
+      <div class="insight-item">
+        <div class="insight-label">
+          <div class="insight-badge" style="background:${it.bg}">${it.icon}</div>
+          ${it.label}
+        </div>
+        <div class="insight-value">${it.val}</div>
+      </div>
+    `).join('');
+  }
+
+  function showToast(msg, type = 'success') {
+    const t = document.getElementById('toast');
+    const icon = document.getElementById('toastIcon');
+    document.getElementById('toastMsg').textContent = msg;
+    t.className = `toast ${type}`;
+    icon.textContent = type === 'success' ? '✓' : '✕';
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  // Init
+  document.getElementById('dateBadge').textContent = '📅 ' + new Date().toLocaleDateString('ar-SA', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+
+  renderTable();
+
+  // Render charts once dashboard is shown (after PIN unlock)
+  const _origCheckPin = window.checkPin;
+  // Patch checkPin to also render charts after unlock
+  document.addEventListener('dashboardReady', () => { renderCharts(); checkExpiryAlerts(); initCloudData(); });
+
+  // Redraw charts on resize
+  window.addEventListener('resize', () => { if(inventory.length>0) renderCharts(); });
+</script>
+</body>
+</html>
